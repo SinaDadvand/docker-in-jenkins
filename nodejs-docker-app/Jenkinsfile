@@ -173,7 +173,7 @@ pipeline {
             }
         }
         
-        // Stage 2: Source Code Analysis
+        // Stage 2: Source Code Analysis and Quality
         stage('📝 Code Analysis') {
             parallel {
                 // Code quality analysis
