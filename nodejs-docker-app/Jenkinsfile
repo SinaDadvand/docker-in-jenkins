@@ -233,7 +233,7 @@ pipeline {
         // Stage 3: Unit and Integration Testing
         stage('🧪 Testing') {
             when {
-                not { params.SKIP_TESTS }
+                expression { !params.SKIP_TESTS }
             }
             parallel {
                 // Unit tests
