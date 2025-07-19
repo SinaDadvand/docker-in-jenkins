@@ -58,7 +58,7 @@ pipeline {
         skipDefaultCheckout(false)
         
         // Colorize console output
-        ansiColor('xterm')
+        //ansiColor('xterm')
     }
     
     // Build parameters (can be set when triggering build manually)
