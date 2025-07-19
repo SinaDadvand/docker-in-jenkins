@@ -100,74 +100,76 @@ pipeline {
         // Stage 1: Environment Setup and Validation
         stage('🔧 Setup & Validation') {
             steps {
-                script {
-                    echo "🚀 Starting Jenkins Docker Integration Pipeline"
-                    echo "📋 Build Information:"
-                    echo "   Job Name: ${env.JOB_NAME}"
-                    echo "   Build Number: ${env.BUILD_NUMBER}"
-                    echo "   Build URL: ${env.BUILD_URL}"
-                    echo "   Workspace: ${env.WORKSPACE}"
-                    echo "   Node Name: ${env.NODE_NAME}"
-                    echo "   Branch: ${env.BRANCH_NAME ?: 'main'}"
-                    echo "   Commit: ${env.GIT_COMMIT ?: 'unknown'}"
+                dir('nodejs-docker-app') {
+                    script {
+                        echo "🚀 Starting Jenkins Docker Integration Pipeline"
+                        echo "📋 Build Information:"
+                        echo "   Job Name: ${env.JOB_NAME}"
+                        echo "   Build Number: ${env.BUILD_NUMBER}"
+                        echo "   Build URL: ${env.BUILD_URL}"
+                        echo "   Workspace: ${env.WORKSPACE}"
+                        echo "   Node Name: ${env.NODE_NAME}"
+                        echo "   Branch: ${env.BRANCH_NAME ?: 'main'}"
+                        echo "   Commit: ${env.GIT_COMMIT ?: 'unknown'}"
+                        
+                        echo "🐳 Docker Configuration:"
+                        echo "   Registry: ${DOCKER_REGISTRY}"
+                        echo "   Repository: ${DOCKER_REPOSITORY}"
+                        echo "   Image Name: ${IMAGE_NAME}"
+                        echo "   Primary Tag: ${IMAGE_TAG}"
+                        echo "   Build Timestamp: ${BUILD_TIMESTAMP}"
+                        
+                        echo "⚙️ Build Parameters:"
+                        echo "   Deploy Environment: ${params.DEPLOY_ENVIRONMENT}"
+                        echo "   Skip Tests: ${params.SKIP_TESTS}"
+                        echo "   Force Rebuild: ${params.FORCE_REBUILD}"
+                        echo "   Custom Tag: ${params.CUSTOM_TAG ?: 'none'}"
+                    }
                     
-                    echo "🐳 Docker Configuration:"
-                    echo "   Registry: ${DOCKER_REGISTRY}"
-                    echo "   Repository: ${DOCKER_REPOSITORY}"
-                    echo "   Image Name: ${IMAGE_NAME}"
-                    echo "   Primary Tag: ${IMAGE_TAG}"
-                    echo "   Build Timestamp: ${BUILD_TIMESTAMP}"
-                    
-                    echo "⚙️ Build Parameters:"
-                    echo "   Deploy Environment: ${params.DEPLOY_ENVIRONMENT}"
-                    echo "   Skip Tests: ${params.SKIP_TESTS}"
-                    echo "   Force Rebuild: ${params.FORCE_REBUILD}"
-                    echo "   Custom Tag: ${params.CUSTOM_TAG ?: 'none'}"
-                }
-                
-                // Validate Docker is available
-                sh '''
-                    echo "🔍 Validating Docker environment..."
-                    
-                    # Check Docker is running
-                    if ! docker info > /dev/null 2>&1; then
-                        echo "❌ Docker is not running or not accessible"
-                        exit 1
-                    fi
-                    echo "✅ Docker is available"
-                    
-                    # Display Docker version information
-                    echo "📊 Docker Environment:"
-                    docker version --format 'Client Version: {{.Client.Version}}'
-                    docker version --format 'Server Version: {{.Server.Version}}'
-                    
-                    # Check available disk space
-                    echo "💾 Disk Space:"
-                    df -h $WORKSPACE
-                    
-                    # Display Docker system information
-                    echo "🐳 Docker System:"
-                    docker system df
-                '''
-                
-                // Validate required files exist
-                sh '''
-                    echo "📁 Validating project structure..."
-                    
-                    # Check for required files
-                    required_files="package.json Dockerfile src/server.js"
-                    for file in $required_files; do
-                        if [ ! -f "$file" ]; then
-                            echo "❌ Required file missing: $file"
+                    // Validate Docker is available
+                    sh '''
+                        echo "🔍 Validating Docker environment..."
+                        
+                        # Check Docker is running
+                        if ! docker info > /dev/null 2>&1; then
+                            echo "❌ Docker is not running or not accessible"
                             exit 1
                         fi
-                        echo "✅ Found: $file"
-                    done
+                        echo "✅ Docker is available"
+                        
+                        # Display Docker version information
+                        echo "📊 Docker Environment:"
+                        docker version --format 'Client Version: {{.Client.Version}}'
+                        docker version --format 'Server Version: {{.Server.Version}}'
+                        
+                        # Check available disk space
+                        echo "💾 Disk Space:"
+                        df -h $WORKSPACE
+                        
+                        # Display Docker system information
+                        echo "🐳 Docker System:"
+                        docker system df
+                    '''
                     
-                    # List project structure
-                    echo "📂 Project Structure:"
-                    find . -type f -name "*.json" -o -name "*.js" -o -name "Dockerfile*" -o -name "*.md" | head -20
-                '''
+                    // Validate required files exist
+                    sh '''
+                        echo "📁 Validating project structure..."
+                        
+                        # Check for required files
+                        required_files="package.json Dockerfile src/server.js"
+                        for file in $required_files; do
+                            if [ ! -f "$file" ]; then
+                                echo "❌ Required file missing: $file"
+                                exit 1
+                            fi
+                            echo "✅ Found: $file"
+                        done
+                        
+                        # List project structure
+                        echo "📂 Project Structure:"
+                        find . -type f -name "*.json" -o -name "*.js" -o -name "Dockerfile*" -o -name "*.md" | head -20
+                    '''
+                }
             }
         }
         
