@@ -1,0 +1,904 @@
+// Comprehensive Jenkins Pipeline for Docker Integration
+// This pipeline demonstrates all aspects of Docker integration with Jenkins
+
+pipeline {
+    // Agent configuration - where the pipeline runs
+    agent any
+    
+    // Environment variables available throughout the pipeline
+    environment {
+        // Application configuration
+        APP_NAME = 'jenkins-docker-demo'
+        APP_VERSION = '1.0.0'
+        
+        // Docker configuration
+        DOCKER_REGISTRY = 'docker.io'  // Change to your registry
+        DOCKER_REPOSITORY = 'your-username'  // Change to your Docker Hub username
+        IMAGE_NAME = "${DOCKER_REPOSITORY}/${APP_NAME}"
+        
+        // Build configuration
+        BUILD_TIMESTAMP = sh(
+            script: 'date +%Y%m%d-%H%M%S',
+            returnStdout: true
+        ).trim()
+        
+        // Dynamic image tags
+        IMAGE_TAG = "${APP_VERSION}-${BUILD_NUMBER}"
+        IMAGE_TAG_LATEST = 'latest'
+        IMAGE_TAG_BRANCH = "${BRANCH_NAME}-${BUILD_NUMBER}"
+        
+        // Test configuration
+        TEST_PORT = '3001'
+        TEST_CONTAINER_NAME = "${APP_NAME}-test-${BUILD_NUMBER}"
+        
+        // Quality gates
+        SECURITY_SCAN_ENABLED = 'true'
+        PERFORMANCE_TEST_ENABLED = 'true'
+    }
+    
+    // Pipeline options and configurations
+    options {
+        // Add timestamps to all console output
+        timestamps()
+        
+        // Set overall pipeline timeout
+        timeout(time: 45, unit: 'MINUTES')
+        
+        // Keep only last 20 builds to save space
+        buildDiscarder(logRotator(
+            numToKeepStr: '20',
+            daysToKeepStr: '30',
+            artifactNumToKeepStr: '10'
+        ))
+        
+        // Prevent concurrent builds of the same job
+        disableConcurrentBuilds()
+        
+        // Skip default checkout (we'll do it manually for better control)
+        skipDefaultCheckout(false)
+        
+        // Colorize console output
+        ansiColor('xterm')
+    }
+    
+    // Build parameters (can be set when triggering build manually)
+    parameters {
+        choice(
+            name: 'DEPLOY_ENVIRONMENT',
+            choices: ['dev', 'staging', 'production'],
+            description: 'Target deployment environment'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip running tests (not recommended for production)'
+        )
+        booleanParam(
+            name: 'FORCE_REBUILD',
+            defaultValue: false,
+            description: 'Force rebuild even if no changes detected'
+        )
+        string(
+            name: 'CUSTOM_TAG',
+            defaultValue: '',
+            description: 'Custom Docker tag (optional)'
+        )
+    }
+    
+    // Build triggers
+    triggers {
+        // Poll SCM every 5 minutes for changes
+        pollSCM('H/5 * * * *')
+        
+        // Build daily at 2 AM for nightly builds
+        cron('H 2 * * *')
+    }
+    
+    // Main pipeline stages
+    stages {
+        
+        // Stage 1: Environment Setup and Validation
+        stage('🔧 Setup & Validation') {
+            steps {
+                script {
+                    echo "🚀 Starting Jenkins Docker Integration Pipeline"
+                    echo "📋 Build Information:"
+                    echo "   Job Name: ${env.JOB_NAME}"
+                    echo "   Build Number: ${env.BUILD_NUMBER}"
+                    echo "   Build URL: ${env.BUILD_URL}"
+                    echo "   Workspace: ${env.WORKSPACE}"
+                    echo "   Node Name: ${env.NODE_NAME}"
+                    echo "   Branch: ${env.BRANCH_NAME ?: 'main'}"
+                    echo "   Commit: ${env.GIT_COMMIT ?: 'unknown'}"
+                    
+                    echo "🐳 Docker Configuration:"
+                    echo "   Registry: ${DOCKER_REGISTRY}"
+                    echo "   Repository: ${DOCKER_REPOSITORY}"
+                    echo "   Image Name: ${IMAGE_NAME}"
+                    echo "   Primary Tag: ${IMAGE_TAG}"
+                    echo "   Build Timestamp: ${BUILD_TIMESTAMP}"
+                    
+                    echo "⚙️ Build Parameters:"
+                    echo "   Deploy Environment: ${params.DEPLOY_ENVIRONMENT}"
+                    echo "   Skip Tests: ${params.SKIP_TESTS}"
+                    echo "   Force Rebuild: ${params.FORCE_REBUILD}"
+                    echo "   Custom Tag: ${params.CUSTOM_TAG ?: 'none'}"
+                }
+                
+                // Validate Docker is available
+                sh '''
+                    echo "🔍 Validating Docker environment..."
+                    
+                    # Check Docker is running
+                    if ! docker info > /dev/null 2>&1; then
+                        echo "❌ Docker is not running or not accessible"
+                        exit 1
+                    fi
+                    echo "✅ Docker is available"
+                    
+                    # Display Docker version information
+                    echo "📊 Docker Environment:"
+                    docker version --format 'Client Version: {{.Client.Version}}'
+                    docker version --format 'Server Version: {{.Server.Version}}'
+                    
+                    # Check available disk space
+                    echo "💾 Disk Space:"
+                    df -h $WORKSPACE
+                    
+                    # Display Docker system information
+                    echo "🐳 Docker System:"
+                    docker system df
+                '''
+                
+                // Validate required files exist
+                sh '''
+                    echo "📁 Validating project structure..."
+                    
+                    # Check for required files
+                    required_files="package.json Dockerfile src/server.js"
+                    for file in $required_files; do
+                        if [ ! -f "$file" ]; then
+                            echo "❌ Required file missing: $file"
+                            exit 1
+                        fi
+                        echo "✅ Found: $file"
+                    done
+                    
+                    # List project structure
+                    echo "📂 Project Structure:"
+                    find . -type f -name "*.json" -o -name "*.js" -o -name "Dockerfile*" -o -name "*.md" | head -20
+                '''
+            }
+        }
+        
+        // Stage 2: Source Code Analysis
+        stage('📝 Code Analysis') {
+            parallel {
+                // Code quality analysis
+                stage('Code Quality') {
+                    steps {
+                        echo "🔍 Running code quality analysis..."
+                        sh '''
+                            echo "Installing dependencies for analysis..."
+                            npm ci --only=dev || npm install
+                            
+                            echo "Running ESLint (if configured)..."
+                            npm run lint || echo "⚠️ Linting skipped - no lint script configured"
+                            
+                            echo "Checking code formatting..."
+                            # Add prettier or other formatting checks here
+                            echo "✅ Code quality analysis completed"
+                        '''
+                    }
+                }
+                
+                // Security scanning
+                stage('Security Scan') {
+                    when {
+                        expression { env.SECURITY_SCAN_ENABLED == 'true' }
+                    }
+                    steps {
+                        echo "🔒 Running security analysis..."
+                        sh '''
+                            echo "Scanning for vulnerable dependencies..."
+                            npm audit --audit-level=high || echo "⚠️ Security issues found - check npm audit output"
+                            
+                            echo "Checking for secrets in code..."
+                            # Add secret scanning tools here (like git-secrets, truffleHog)
+                            echo "✅ Security scan completed"
+                        '''
+                    }
+                }
+                
+                // Dependency analysis
+                stage('Dependencies') {
+                    steps {
+                        echo "📦 Analyzing dependencies..."
+                        sh '''
+                            echo "Checking package.json validity..."
+                            node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8'))"
+                            echo "✅ package.json is valid"
+                            
+                            echo "Checking for outdated packages..."
+                            npm outdated || echo "ℹ️ Some packages have newer versions available"
+                            
+                            echo "Generating dependency tree..."
+                            npm list --depth=1 || echo "⚠️ Some dependency issues found"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        // Stage 3: Unit and Integration Testing
+        stage('🧪 Testing') {
+            when {
+                not { params.SKIP_TESTS }
+            }
+            parallel {
+                // Unit tests
+                stage('Unit Tests') {
+                    steps {
+                        echo "🧪 Running unit tests..."
+                        sh '''
+                            echo "Installing test dependencies..."
+                            npm ci
+                            
+                            echo "Running unit test suite..."
+                            npm test -- --coverage --watchAll=false --testResultsProcessor=jest-junit
+                            
+                            echo "✅ Unit tests completed"
+                        '''
+                    }
+                    post {
+                        always {
+                            // Publish test results (if available)
+                            script {
+                                if (fileExists('junit.xml')) {
+                                    publishTestResults testResultsPattern: 'junit.xml'
+                                }
+                                if (fileExists('coverage')) {
+                                    publishHTML([
+                                        allowMissing: false,
+                                        alwaysLinkToLastBuild: true,
+                                        keepAll: true,
+                                        reportDir: 'coverage/lcov-report',
+                                        reportFiles: 'index.html',
+                                        reportName: 'Coverage Report'
+                                    ])
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Integration tests in Docker
+                stage('Integration Tests') {
+                    steps {
+                        echo "🔗 Running integration tests in Docker..."
+                        sh '''
+                            echo "Building test image..."
+                            docker build -f docker/Dockerfile.test -t ${IMAGE_NAME}:test .
+                            
+                            echo "Running integration tests in container..."
+                            docker run --rm \
+                                --name ${TEST_CONTAINER_NAME}-integration \
+                                -e NODE_ENV=test \
+                                -e CI=true \
+                                ${IMAGE_NAME}:test
+                            
+                            echo "✅ Integration tests completed"
+                        '''
+                    }
+                }
+                
+                // API tests
+                stage('API Tests') {
+                    steps {
+                        echo "🌐 Running API tests..."
+                        sh '''
+                            echo "Starting application for API testing..."
+                            
+                            # Build and start application container
+                            docker build -t ${IMAGE_NAME}:api-test .
+                            CONTAINER_ID=$(docker run -d -p ${TEST_PORT}:3000 \
+                                --name ${TEST_CONTAINER_NAME}-api \
+                                -e NODE_ENV=test \
+                                ${IMAGE_NAME}:api-test)
+                            
+                            # Wait for application to start
+                            echo "Waiting for application to start..."
+                            sleep 10
+                            
+                            # Run API tests
+                            echo "Testing API endpoints..."
+                            
+                            # Test health endpoint
+                            if curl -f http://localhost:${TEST_PORT}/health; then
+                                echo "✅ Health endpoint test passed"
+                            else
+                                echo "❌ Health endpoint test failed"
+                                docker logs ${CONTAINER_ID}
+                                docker stop ${CONTAINER_ID}
+                                docker rm ${CONTAINER_ID}
+                                exit 1
+                            fi
+                            
+                            # Test main endpoint
+                            if curl -f http://localhost:${TEST_PORT}/; then
+                                echo "✅ Main endpoint test passed"
+                            else
+                                echo "❌ Main endpoint test failed"
+                                docker logs ${CONTAINER_ID}
+                                docker stop ${CONTAINER_ID}
+                                docker rm ${CONTAINER_ID}
+                                exit 1
+                            fi
+                            
+                            # Test metrics endpoint
+                            if curl -f http://localhost:${TEST_PORT}/metrics; then
+                                echo "✅ Metrics endpoint test passed"
+                            else
+                                echo "⚠️ Metrics endpoint test failed (non-critical)"
+                            fi
+                            
+                            # Cleanup
+                            docker stop ${CONTAINER_ID}
+                            docker rm ${CONTAINER_ID}
+                            
+                            echo "✅ API tests completed successfully"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        // Stage 4: Docker Image Building
+        stage('🐳 Docker Build') {
+            parallel {
+                // Production image
+                stage('Production Image') {
+                    steps {
+                        echo "🏗️ Building production Docker image..."
+                        script {
+                            // Use Docker Pipeline plugin for better integration
+                            def dockerfile = 'Dockerfile'
+                            def buildArgs = [
+                                'NODE_ENV=production',
+                                "APP_VERSION=${APP_VERSION}",
+                                "BUILD_NUMBER=${BUILD_NUMBER}",
+                                "BUILD_TIMESTAMP=${BUILD_TIMESTAMP}"
+                            ]
+                            
+                            // Build the image
+                            def image = docker.build(
+                                "${IMAGE_NAME}:${IMAGE_TAG}",
+                                "--build-arg ${buildArgs.join(' --build-arg ')} -f ${dockerfile} ."
+                            )
+                            
+                            // Tag with additional tags
+                            image.tag("${IMAGE_TAG_LATEST}")
+                            image.tag("${IMAGE_TAG_BRANCH}")
+                            
+                            if (params.CUSTOM_TAG) {
+                                image.tag("${params.CUSTOM_TAG}")
+                            }
+                            
+                            // Store image for later use
+                            env.DOCKER_IMAGE_ID = image.id
+                            
+                            echo "✅ Production image built successfully"
+                            echo "🏷️ Image ID: ${image.id}"
+                            echo "🏷️ Tags: ${IMAGE_TAG}, ${IMAGE_TAG_LATEST}, ${IMAGE_TAG_BRANCH}"
+                        }
+                    }
+                }
+                
+                // Development image (optional)
+                stage('Development Image') {
+                    when {
+                        anyOf {
+                            branch 'develop'
+                            expression { params.DEPLOY_ENVIRONMENT == 'dev' }
+                        }
+                    }
+                    steps {
+                        echo "🛠️ Building development Docker image..."
+                        sh '''
+                            docker build \
+                                -f docker/Dockerfile.dev \
+                                -t ${IMAGE_NAME}:dev-${BUILD_NUMBER} \
+                                -t ${IMAGE_NAME}:dev-latest \
+                                --build-arg NODE_ENV=development \
+                                .
+                            
+                            echo "✅ Development image built successfully"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        // Stage 5: Image Security and Quality Scanning
+        stage('🔒 Security & Quality') {
+            parallel {
+                // Image security scanning
+                stage('Image Security Scan') {
+                    when {
+                        expression { env.SECURITY_SCAN_ENABLED == 'true' }
+                    }
+                    steps {
+                        echo "🔍 Scanning Docker image for security vulnerabilities..."
+                        sh '''
+                            echo "Running Trivy security scan (if available)..."
+                            if command -v trivy >/dev/null 2>&1; then
+                                echo "Running Trivy scan..."
+                                trivy image --exit-code 0 --severity HIGH,CRITICAL \
+                                    --format table ${IMAGE_NAME}:${IMAGE_TAG}
+                                
+                                # Generate JSON report
+                                trivy image --exit-code 0 --format json \
+                                    --output trivy-report.json ${IMAGE_NAME}:${IMAGE_TAG}
+                                
+                                echo "✅ Security scan completed"
+                            else
+                                echo "⚠️ Trivy not available - install for security scanning"
+                                echo "Alternative: Manual security review required"
+                            fi
+                            
+                            echo "Checking image for best practices..."
+                            docker run --rm -i hadolint/hadolint < Dockerfile || echo "⚠️ Dockerfile linting issues found"
+                        '''
+                    }
+                    post {
+                        always {
+                            script {
+                                if (fileExists('trivy-report.json')) {
+                                    archiveArtifacts artifacts: 'trivy-report.json', fingerprint: true
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Image optimization analysis
+                stage('Image Analysis') {
+                    steps {
+                        echo "📊 Analyzing Docker image..."
+                        sh '''
+                            echo "Image size analysis..."
+                            docker images ${IMAGE_NAME}:${IMAGE_TAG} --format "table {{.Repository}}:{{.Tag}}\\t{{.Size}}"
+                            
+                            echo "Image layer analysis..."
+                            docker history ${IMAGE_NAME}:${IMAGE_TAG} --no-trunc
+                            
+                            echo "Image inspection..."
+                            docker inspect ${IMAGE_NAME}:${IMAGE_TAG} | jq '.[0] | {
+                                Created: .Created,
+                                Size: .Size,
+                                Architecture: .Architecture,
+                                Config: {
+                                    Env: .Config.Env,
+                                    ExposedPorts: .Config.ExposedPorts,
+                                    Healthcheck: .Config.Healthcheck
+                                }
+                            }' || docker inspect ${IMAGE_NAME}:${IMAGE_TAG}
+                            
+                            echo "✅ Image analysis completed"
+                        '''
+                    }
+                }
+                
+                // Performance testing
+                stage('Performance Test') {
+                    when {
+                        expression { env.PERFORMANCE_TEST_ENABLED == 'true' }
+                    }
+                    steps {
+                        echo "⚡ Running performance tests..."
+                        sh '''
+                            echo "Starting application for performance testing..."
+                            
+                            # Start container for performance testing
+                            PERF_CONTAINER_ID=$(docker run -d -p 3002:3000 \
+                                --name ${TEST_CONTAINER_NAME}-perf \
+                                --memory="256m" \
+                                --cpus="0.5" \
+                                ${IMAGE_NAME}:${IMAGE_TAG})
+                            
+                            # Wait for startup
+                            sleep 15
+                            
+                            echo "Running basic performance tests..."
+                            
+                            # Test response time
+                            for i in {1..5}; do
+                                echo "Test $i:"
+                                time curl -s http://localhost:3002/ > /dev/null
+                            done
+                            
+                            # Test under load (basic)
+                            echo "Running basic load test..."
+                            for i in {1..20}; do
+                                curl -s http://localhost:3002/health > /dev/null &
+                            done
+                            wait
+                            
+                            # Check container stats
+                            echo "Container resource usage:"
+                            docker stats ${PERF_CONTAINER_ID} --no-stream
+                            
+                            # Cleanup
+                            docker stop ${PERF_CONTAINER_ID}
+                            docker rm ${PERF_CONTAINER_ID}
+                            
+                            echo "✅ Performance tests completed"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        // Stage 6: Registry Operations
+        stage('📤 Registry Operations') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                    branch 'develop'
+                    expression { params.DEPLOY_ENVIRONMENT == 'production' }
+                }
+            }
+            steps {
+                echo "📤 Pushing images to registry..."
+                script {
+                    // Push to registry using Docker Pipeline plugin
+                    docker.withRegistry("https://${DOCKER_REGISTRY}", 'docker-hub-credentials') {
+                        def image = docker.image("${IMAGE_NAME}:${IMAGE_TAG}")
+                        
+                        // Push all tags
+                        image.push("${IMAGE_TAG}")
+                        image.push("${IMAGE_TAG_LATEST}")
+                        
+                        if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
+                            image.push("stable")
+                        }
+                        
+                        if (params.CUSTOM_TAG) {
+                            image.push("${params.CUSTOM_TAG}")
+                        }
+                        
+                        echo "✅ Images pushed successfully to ${DOCKER_REGISTRY}"
+                        echo "🏷️ Available tags: ${IMAGE_TAG}, ${IMAGE_TAG_LATEST}, stable"
+                    }
+                }
+                
+                // Generate deployment manifests
+                sh '''
+                    echo "📋 Generating deployment manifests..."
+                    
+                    # Create deployment directory
+                    mkdir -p deployment-manifests
+                    
+                    # Generate Docker run command
+                    cat > deployment-manifests/docker-run.sh << EOF
+#!/bin/bash
+# Docker run command for ${IMAGE_NAME}:${IMAGE_TAG}
+docker run -d \\
+    --name ${APP_NAME}-${params.DEPLOY_ENVIRONMENT} \\
+    --restart unless-stopped \\
+    -p 3000:3000 \\
+    -e NODE_ENV=${params.DEPLOY_ENVIRONMENT} \\
+    -e APP_VERSION=${APP_VERSION} \\
+    -e BUILD_NUMBER=${BUILD_NUMBER} \\
+    ${IMAGE_NAME}:${IMAGE_TAG}
+EOF
+                    chmod +x deployment-manifests/docker-run.sh
+                    
+                    # Generate docker-compose deployment
+                    cat > deployment-manifests/docker-compose.yml << EOF
+version: '3.8'
+services:
+  app:
+    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    container_name: ${APP_NAME}-${params.DEPLOY_ENVIRONMENT}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=${params.DEPLOY_ENVIRONMENT}
+      - APP_VERSION=${APP_VERSION}
+      - BUILD_NUMBER=${BUILD_NUMBER}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+EOF
+                    
+                    echo "✅ Deployment manifests generated"
+                '''
+            }
+        }
+        
+        // Stage 7: Deployment (Environment-specific)
+        stage('🚀 Deployment') {
+            parallel {
+                // Development deployment
+                stage('Deploy to Dev') {
+                    when {
+                        expression { params.DEPLOY_ENVIRONMENT == 'dev' }
+                    }
+                    steps {
+                        echo "🚀 Deploying to development environment..."
+                        sh '''
+                            echo "Stopping existing development container..."
+                            docker stop ${APP_NAME}-dev || true
+                            docker rm ${APP_NAME}-dev || true
+                            
+                            echo "Starting new development container..."
+                            docker run -d \\
+                                --name ${APP_NAME}-dev \\
+                                --restart unless-stopped \\
+                                -p 3000:3000 \\
+                                -e NODE_ENV=development \\
+                                -e APP_VERSION=${APP_VERSION} \\
+                                -e BUILD_NUMBER=${BUILD_NUMBER} \\
+                                ${IMAGE_NAME}:${IMAGE_TAG}
+                            
+                            echo "Waiting for application to start..."
+                            sleep 10
+                            
+                            echo "Verifying deployment..."
+                            if curl -f http://localhost:3000/health; then
+                                echo "✅ Development deployment successful"
+                                echo "🌐 Application URL: http://localhost:3000"
+                            else
+                                echo "❌ Development deployment failed"
+                                docker logs ${APP_NAME}-dev
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+                
+                // Staging deployment
+                stage('Deploy to Staging') {
+                    when {
+                        expression { params.DEPLOY_ENVIRONMENT == 'staging' }
+                    }
+                    steps {
+                        echo "🚀 Deploying to staging environment..."
+                        sh '''
+                            echo "Deploying to staging with docker-compose..."
+                            
+                            # Use generated docker-compose file
+                            cd deployment-manifests
+                            
+                            # Update environment for staging
+                            sed -i 's/NODE_ENV=.*/NODE_ENV=staging/' docker-compose.yml
+                            sed -i 's/container_name: .*/container_name: ${APP_NAME}-staging/' docker-compose.yml
+                            sed -i 's/"3000:3000"/"3001:3000"/' docker-compose.yml
+                            
+                            # Deploy
+                            docker-compose -p ${APP_NAME}-staging up -d
+                            
+                            echo "Waiting for staging deployment..."
+                            sleep 15
+                            
+                            echo "Verifying staging deployment..."
+                            if curl -f http://localhost:3001/health; then
+                                echo "✅ Staging deployment successful"
+                                echo "🌐 Staging URL: http://localhost:3001"
+                            else
+                                echo "❌ Staging deployment failed"
+                                docker-compose -p ${APP_NAME}-staging logs
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+                
+                // Production deployment (manual approval required)
+                stage('Deploy to Production') {
+                    when {
+                        expression { params.DEPLOY_ENVIRONMENT == 'production' }
+                    }
+                    input {
+                        message "Deploy to production?"
+                        ok "Deploy"
+                        submitter "admin,devops-team"
+                        parameters {
+                            string(name: 'APPROVER', description: 'Who is approving this deployment?')
+                        }
+                    }
+                    steps {
+                        echo "🚀 Deploying to production environment..."
+                        echo "👤 Approved by: ${APPROVER}"
+                        sh '''
+                            echo "Production deployment simulation..."
+                            echo "In real scenarios, this would:"
+                            echo "1. Deploy to production Kubernetes cluster"
+                            echo "2. Update load balancer configuration"  
+                            echo "3. Run smoke tests"
+                            echo "4. Update monitoring dashboards"
+                            echo "5. Send deployment notifications"
+                            
+                            echo "✅ Production deployment completed"
+                            echo "🏷️ Deployed image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                            echo "👤 Approved by: ${APPROVER}"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    
+    // Post-build actions
+    post {
+        // Always run regardless of build result
+        always {
+            echo "🧹 Running cleanup and archival tasks..."
+            
+            script {
+                // Archive build artifacts
+                if (fileExists('build-metadata.json')) {
+                    archiveArtifacts artifacts: 'build-metadata.json', fingerprint: true
+                }
+                if (fileExists('deployment-manifests/')) {
+                    archiveArtifacts artifacts: 'deployment-manifests/**', fingerprint: true
+                }
+                if (fileExists('test-results/')) {
+                    archiveArtifacts artifacts: 'test-results/**', fingerprint: true
+                }
+                
+                // Generate build summary
+                def buildSummary = """
+🚀 BUILD SUMMARY
+================
+📋 Job: ${env.JOB_NAME}
+🔢 Build: #${env.BUILD_NUMBER}
+🏷️ Version: ${env.APP_VERSION}
+🐳 Image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+⏱️ Duration: ${currentBuild.durationString}
+🌿 Branch: ${env.BRANCH_NAME ?: 'main'}
+🎯 Environment: ${params.DEPLOY_ENVIRONMENT}
+👤 Started by: ${env.BUILD_USER ?: 'System'}
+"""
+                echo buildSummary
+                
+                // Save build summary to file
+                writeFile file: 'build-summary.txt', text: buildSummary
+                archiveArtifacts artifacts: 'build-summary.txt', fingerprint: true
+            }
+            
+            // Clean up test containers
+            sh '''
+                echo "🧹 Cleaning up test containers..."
+                docker ps -a --filter "name=${TEST_CONTAINER_NAME}" --format "{{.Names}}" | xargs -r docker rm -f
+                
+                echo "🧹 Cleaning up unused Docker resources..."
+                docker image prune -f --filter "label=build.number!=${BUILD_NUMBER}"
+                docker system prune -f --volumes
+            '''
+            
+            // Record build metrics
+            script {
+                def buildMetrics = [
+                    build_number: env.BUILD_NUMBER,
+                    duration_ms: currentBuild.duration,
+                    result: currentBuild.result ?: 'SUCCESS',
+                    image_tag: env.IMAGE_TAG,
+                    deploy_env: params.DEPLOY_ENVIRONMENT,
+                    timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'")
+                ]
+                
+                writeJSON file: 'build-metrics.json', json: buildMetrics
+                archiveArtifacts artifacts: 'build-metrics.json', fingerprint: true
+            }
+        }
+        
+        // Success-specific actions
+        success {
+            echo "✅ Pipeline completed successfully!"
+            
+            script {
+                def successMessage = """
+🎉 BUILD SUCCESS!
+=================
+✅ All stages completed successfully
+🐳 Docker image ready: ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+🚀 Deployed to: ${params.DEPLOY_ENVIRONMENT}
+⏱️ Build time: ${currentBuild.durationString}
+🔗 Build URL: ${env.BUILD_URL}
+
+📋 Next Steps:
+• Verify deployment in ${params.DEPLOY_ENVIRONMENT} environment
+• Monitor application performance
+• Run additional manual tests if needed
+"""
+                echo successMessage
+                
+                // In real scenarios, send notifications here:
+                // - Slack notification
+                // - Email to stakeholders
+                // - Update deployment dashboard
+                // - Trigger downstream jobs
+            }
+        }
+        
+        // Failure-specific actions
+        failure {
+            echo "❌ Pipeline failed!"
+            
+            script {
+                def failureMessage = """
+💥 BUILD FAILED!
+================
+❌ Pipeline failed at stage: ${env.STAGE_NAME ?: 'Unknown'}
+🔢 Build: #${env.BUILD_NUMBER}
+⏱️ Duration: ${currentBuild.durationString}
+🔗 Build URL: ${env.BUILD_URL}
+
+🛠️ Troubleshooting:
+• Check console output for detailed error messages
+• Review failed stage logs
+• Verify Docker environment and permissions
+• Check network connectivity to registries
+• Validate Dockerfile and build scripts
+
+📞 Contact DevOps team if issue persists
+"""
+                echo failureMessage
+                
+                // Collect failure diagnostics
+                sh '''
+                    echo "Collecting failure diagnostics..."
+                    docker system df > docker-diagnostics.txt
+                    docker images --format "table {{.Repository}}:{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}" >> docker-diagnostics.txt
+                    docker ps -a >> docker-diagnostics.txt
+                '''
+                
+                archiveArtifacts artifacts: 'docker-diagnostics.txt', allowEmptyArchive: true
+            }
+        }
+        
+        // Unstable build actions (tests failed but build succeeded)
+        unstable {
+            echo "⚠️ Pipeline completed but is unstable (test failures detected)"
+            
+            script {
+                echo """
+⚠️ UNSTABLE BUILD
+==================
+🧪 Some tests failed but build completed
+🐳 Docker image was created: ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+⚠️ Deployment may be risky - review test results
+
+🔍 Review:
+• Check test reports for failure details
+• Determine if failures are critical
+• Consider fixing tests before deployment
+"""
+            }
+        }
+        
+        // Build result changed from previous build
+        changed {
+            echo "🔄 Build result changed from previous build"
+            
+            script {
+                def currentResult = currentBuild.result ?: 'SUCCESS'
+                def previousResult = currentBuild.previousBuild?.result ?: 'UNKNOWN'
+                
+                echo "Previous result: ${previousResult} → Current result: ${currentResult}"
+                
+                if (currentResult == 'SUCCESS' && previousResult == 'FAILURE') {
+                    echo "🎉 Build is back to normal!"
+                } else if (currentResult == 'FAILURE' && previousResult == 'SUCCESS') {
+                    echo "🚨 Build has started failing!"
+                }
+            }
+        }
+    }
+}

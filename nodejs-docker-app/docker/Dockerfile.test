@@ -1,0 +1,40 @@
+# Testing Dockerfile for running tests in isolated environment
+FROM node:18-alpine AS test
+
+# Set metadata
+LABEL maintainer="jenkins-learning@example.com"
+LABEL description="Jenkins Docker Demo - Testing"
+LABEL version="1.0.0-test"
+
+# Install testing tools
+RUN apk --no-cache add \
+    curl \
+    bash
+
+# Create application directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm install
+RUN npm ci --silent
+
+# Copy source and test files
+COPY src/ ./src/
+COPY tests/ ./tests/
+
+# Set test environment
+ENV NODE_ENV=test
+ENV CI=true
+
+# Create test user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs && \
+    chown -R nodejs:nodejs /app
+
+USER nodejs
+
+# Run tests by default
+CMD ["npm", "test"]

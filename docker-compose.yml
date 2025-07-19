@@ -1,0 +1,120 @@
+# Docker Compose configuration for development environment
+version: '3.8'
+
+services:
+  # Main application service
+  app:
+    # Build from development Dockerfile
+    build:
+      context: ./nodejs-docker-app
+      dockerfile: Dockerfile
+      # Build arguments passed to Dockerfile
+      args:
+        NODE_ENV: development
+        
+    # Container name for easy reference
+    container_name: jenkins-demo-app-dev
+    
+    # Port mapping: host:container
+    ports:
+      - "3000:3000"   # Application port
+      - "9229:9229"   # Debug port for Node.js debugging
+    
+    # Environment variables for development
+    environment:
+      - NODE_ENV=development
+      - DEBUG=*
+      - PORT=3000
+      - APP_VERSION=1.0.0-dev
+      - BUILD_NUMBER=dev-build
+    
+    # Volume mounts for hot reloading
+    volumes:
+      # Mount source code for live editing
+      - ./nodejs-docker-app/src:/app/src:ro
+      # Mount tests for live test updates
+      - ./nodejs-docker-app/tests:/app/tests:ro
+      # Node modules volume to improve performance
+      - node_modules:/app/node_modules
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Connect to custom network
+    networks:
+      - jenkins-demo-network
+
+  # Testing service
+  test:
+    build:
+      context: ./nodejs-docker-app
+      dockerfile: docker/Dockerfile.test
+    container_name: jenkins-demo-app-test
+    environment:
+      - NODE_ENV=test
+      - CI=true
+    volumes:
+      # CORRECTED PATHS
+      - ./nodejs-docker-app/src:/app/src:ro
+      - ./nodejs-docker-app/tests:/app/tests:ro
+      - test_results:/app/test-results
+    # Don't start automatically - run manually for testing
+    profiles:
+      - testing
+    networks:
+      - jenkins-demo-network
+
+  # Database service (for demonstration)
+  db:
+    image: postgres:15-alpine
+    container_name: jenkins-demo-db
+    environment:
+      POSTGRES_DB: jenkins_demo
+      POSTGRES_USER: demo_user
+      POSTGRES_PASSWORD: demo_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo_user -d jenkins_demo"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - jenkins-demo-network
+
+  # Redis service (for demonstration)
+  redis:
+    image: redis:7-alpine
+    container_name: jenkins-demo-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - jenkins-demo-network
+
+# Named volumes for data persistence
+volumes:
+  node_modules:    # Node.js dependencies
+  postgres_data:   # PostgreSQL data
+  test_results:    # Test result files
+
+# Custom network for service communication
+networks:
+  jenkins-demo-network:
+    driver: bridge
+    # Enable IPv6 support (optional)
+    enable_ipv6: false

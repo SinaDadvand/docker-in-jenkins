@@ -1,0 +1,48 @@
+# Development Dockerfile with hot reloading and debugging tools
+FROM node:18-alpine AS development
+
+# Set metadata
+LABEL maintainer="jenkins-learning@example.com"
+LABEL description="Jenkins Docker Demo - Development"
+LABEL version="1.0.0-dev"
+
+# Install development tools
+RUN apk --no-cache add \
+    curl \
+    git \
+    bash \
+    vim
+
+# Create application directory
+WORKDIR /app
+
+# Create node user for development
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm install
+RUN npm ci --silent
+
+# Copy source code
+COPY . .
+
+# Change ownership to nodejs user
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Set development environment
+ENV NODE_ENV=development
+ENV PORT=3000
+ENV DEBUG=*
+
+# Expose port and debug port
+EXPOSE 3000 9229
+
+# Use nodemon for hot reloading in development
+CMD ["npm", "run", "dev"]
