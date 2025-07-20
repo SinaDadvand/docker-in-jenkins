@@ -173,23 +173,25 @@ pipeline {
             }
         }
         
-        // Stage 2: Source Code Analysis and Quality
+        // Stage 2: Source Code Analysis and Quality Gates
         stage('📝 Code Analysis') {
             parallel {
                 // Code quality analysis
                 stage('Code Quality') {
+                    tools {
+                        nodejs 'NodeJS-18' // Name configured in Jenkins
+                    }
                     steps {
                         echo "🔍 Running code quality analysis..."
                         sh '''
+                            echo "Node.js version: $(node --version)"
+                            echo "npm version: $(npm --version)"
+                            
                             echo "Installing dependencies for analysis..."
                             npm ci --only=dev || npm install
                             
                             echo "Running ESLint (if configured)..."
                             npm run lint || echo "⚠️ Linting skipped - no lint script configured"
-                            
-                            echo "Checking code formatting..."
-                            # Add prettier or other formatting checks here
-                            echo "✅ Code quality analysis completed"
                         '''
                     }
                 }
