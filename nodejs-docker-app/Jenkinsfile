@@ -5,6 +5,11 @@ pipeline {
     // Agent configuration - where the pipeline runs
     agent any
     
+    // Global tools - available to all stages
+    tools {
+        nodejs 'NodeJS-24'  // This should be exactly as configured in Global Tool Configuration
+    }
+    
     // Environment variables available throughout the pipeline
     environment {
         // Application configuration
@@ -178,9 +183,6 @@ pipeline {
             parallel {
                 // Code quality analysis
                 stage('Code Quality') {
-                    tools {
-                        nodejs 'NodeJS-24' // Name configured in Jenkins
-                    }
                     steps {
                         echo "🔍 Running code quality analysis..."
                         sh '''
