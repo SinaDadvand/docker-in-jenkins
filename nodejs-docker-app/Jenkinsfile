@@ -188,14 +188,11 @@ pipeline {
                     steps {
                         echo "🔍 Running code quality analysis..."
                         sh '''
-                            echo "Node.js version: $(node --version)"
-                            echo "npm version: $(npm --version)"
-                            
-                            echo "Installing dependencies for analysis..."
-                            npm ci --only=dev || npm install
-                            
-                            echo "Running ESLint (if configured)..."
-                            npm run lint || echo "⚠️ Linting skipped - no lint script configured"
+                            docker run --rm -v ${PWD}/nodejs-docker-app:/app -w /app node:18-alpine sh -c "
+                                npm --version
+                                npm ci --only=dev || npm install
+                                npm run lint || echo 'No lint script'
+                            "
                         '''
                     }
                 }
