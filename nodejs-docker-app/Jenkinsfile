@@ -3,7 +3,9 @@
 
 pipeline {
     // Agent configuration - where the pipeline runs
-    agent any
+    agent {
+        label 'nodejs-agent'  // Use specific agent with NodeJS installed
+    }
     
     // Global tools - available to all stages
     tools {
