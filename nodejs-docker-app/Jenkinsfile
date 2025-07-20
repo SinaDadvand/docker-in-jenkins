@@ -179,7 +179,7 @@ pipeline {
                 // Code quality analysis
                 stage('Code Quality') {
                     tools {
-                        nodejs 'NodeJS-18' // Name configured in Jenkins
+                        nodejs 'NodeJS-24' // Name configured in Jenkins
                     }
                     steps {
                         echo "🔍 Running code quality analysis..."
