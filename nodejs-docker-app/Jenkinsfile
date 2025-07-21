@@ -250,10 +250,12 @@ pipeline {
                             sh '''
                                 echo "🧪 Running unit tests..."
                                 echo "Checking for package-lock.json..."
-                                if [ ! -f "package-lock.json" ]; then
-                                    echo "Generating package-lock.json..."
-                                    npm install --package-lock-only
-                                fi
+                                # if [ ! -f "package-lock.json" ]; then
+                                #    echo "Generating package-lock.json..."
+                                #    npm install --package-lock-only
+                                # fi
+
+                                npm install --package-lock-only
                                 
                                 echo "Installing test dependencies..."
                                 npm ci
