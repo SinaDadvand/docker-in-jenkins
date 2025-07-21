@@ -242,122 +242,124 @@ pipeline {
             when {
                 expression { !params.SKIP_TESTS }
             }
-            parallel {
-                // Unit tests
-                stage('Unit Tests') {
-                    steps {
-                        echo "🧪 Running unit tests..."
-                        sh '''
-                            echo "Installing test dependencies..."
-                            npm ci
-                            
-                            echo "Running unit test suite..."
-                            npm test -- --coverage --watchAll=false --testResultsProcessor=jest-junit
-                            
-                            echo "✅ Unit tests completed"
-                        '''
-                    }
-                    post {
-                        always {
-                            // Publish test results (if available)
-                            script {
-                                if (fileExists('junit.xml')) {
-                                    publishTestResults testResultsPattern: 'junit.xml'
-                                }
-                                if (fileExists('coverage')) {
-                                    publishHTML([
-                                        allowMissing: false,
-                                        alwaysLinkToLastBuild: true,
-                                        keepAll: true,
-                                        reportDir: 'coverage/lcov-report',
-                                        reportFiles: 'index.html',
-                                        reportName: 'Coverage Report'
-                                    ])
+            dir('nodejs-docker-app') {    
+                parallel {
+                    // Unit tests
+                    stage('Unit Tests') {
+                        steps {
+                            echo "🧪 Running unit tests..."
+                            sh '''
+                                echo "Installing test dependencies..."
+                                npm ci
+                                
+                                echo "Running unit test suite..."
+                                npm test -- --coverage --watchAll=false --testResultsProcessor=jest-junit
+                                
+                                echo "✅ Unit tests completed"
+                            '''
+                        }
+                        post {
+                            always {
+                                // Publish test results (if available)
+                                script {
+                                    if (fileExists('junit.xml')) {
+                                        publishTestResults testResultsPattern: 'junit.xml'
+                                    }
+                                    if (fileExists('coverage')) {
+                                        publishHTML([
+                                            allowMissing: false,
+                                            alwaysLinkToLastBuild: true,
+                                            keepAll: true,
+                                            reportDir: 'coverage/lcov-report',
+                                            reportFiles: 'index.html',
+                                            reportName: 'Coverage Report'
+                                        ])
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                
-                // Integration tests in Docker
-                stage('Integration Tests') {
-                    steps {
-                        echo "🔗 Running integration tests in Docker..."
-                        sh '''
-                            echo "Building test image..."
-                            docker build -f docker/Dockerfile.test -t ${IMAGE_NAME}:test .
-                            
-                            echo "Running integration tests in container..."
-                            docker run --rm \
-                                --name ${TEST_CONTAINER_NAME}-integration \
-                                -e NODE_ENV=test \
-                                -e CI=true \
-                                ${IMAGE_NAME}:test
-                            
-                            echo "✅ Integration tests completed"
-                        '''
+                    
+                    // Integration tests in Docker
+                    stage('Integration Tests') {
+                        steps {
+                            echo "🔗 Running integration tests in Docker..."
+                            sh '''
+                                echo "Building test image..."
+                                docker build -f docker/Dockerfile.test -t ${IMAGE_NAME}:test .
+                                
+                                echo "Running integration tests in container..."
+                                docker run --rm \
+                                    --name ${TEST_CONTAINER_NAME}-integration \
+                                    -e NODE_ENV=test \
+                                    -e CI=true \
+                                    ${IMAGE_NAME}:test
+                                
+                                echo "✅ Integration tests completed"
+                            '''
+                        }
                     }
-                }
-                
-                // API tests
-                stage('API Tests') {
-                    steps {
-                        echo "🌐 Running API tests..."
-                        sh '''
-                            echo "Starting application for API testing..."
-                            
-                            # Build and start application container
-                            docker build -t ${IMAGE_NAME}:api-test .
-                            CONTAINER_ID=$(docker run -d -p ${TEST_PORT}:3000 \
-                                --name ${TEST_CONTAINER_NAME}-api \
-                                -e NODE_ENV=test \
-                                ${IMAGE_NAME}:api-test)
-                            
-                            # Wait for application to start
-                            echo "Waiting for application to start..."
-                            sleep 10
-                            
-                            # Run API tests
-                            echo "Testing API endpoints..."
-                            
-                            # Test health endpoint
-                            if curl -f http://localhost:${TEST_PORT}/health; then
-                                echo "✅ Health endpoint test passed"
-                            else
-                                echo "❌ Health endpoint test failed"
-                                docker logs ${CONTAINER_ID}
+                    
+                    // API tests
+                    stage('API Tests') {
+                        steps {
+                            echo "🌐 Running API tests..."
+                            sh '''
+                                echo "Starting application for API testing..."
+                                
+                                # Build and start application container
+                                docker build -t ${IMAGE_NAME}:api-test .
+                                CONTAINER_ID=$(docker run -d -p ${TEST_PORT}:3000 \
+                                    --name ${TEST_CONTAINER_NAME}-api \
+                                    -e NODE_ENV=test \
+                                    ${IMAGE_NAME}:api-test)
+                                
+                                # Wait for application to start
+                                echo "Waiting for application to start..."
+                                sleep 10
+                                
+                                # Run API tests
+                                echo "Testing API endpoints..."
+                                
+                                # Test health endpoint
+                                if curl -f http://localhost:${TEST_PORT}/health; then
+                                    echo "✅ Health endpoint test passed"
+                                else
+                                    echo "❌ Health endpoint test failed"
+                                    docker logs ${CONTAINER_ID}
+                                    docker stop ${CONTAINER_ID}
+                                    docker rm ${CONTAINER_ID}
+                                    exit 1
+                                fi
+                                
+                                # Test main endpoint
+                                if curl -f http://localhost:${TEST_PORT}/; then
+                                    echo "✅ Main endpoint test passed"
+                                else
+                                    echo "❌ Main endpoint test failed"
+                                    docker logs ${CONTAINER_ID}
+                                    docker stop ${CONTAINER_ID}
+                                    docker rm ${CONTAINER_ID}
+                                    exit 1
+                                fi
+                                
+                                # Test metrics endpoint
+                                if curl -f http://localhost:${TEST_PORT}/metrics; then
+                                    echo "✅ Metrics endpoint test passed"
+                                else
+                                    echo "⚠️ Metrics endpoint test failed (non-critical)"
+                                fi
+                                
+                                # Cleanup
                                 docker stop ${CONTAINER_ID}
                                 docker rm ${CONTAINER_ID}
-                                exit 1
-                            fi
-                            
-                            # Test main endpoint
-                            if curl -f http://localhost:${TEST_PORT}/; then
-                                echo "✅ Main endpoint test passed"
-                            else
-                                echo "❌ Main endpoint test failed"
-                                docker logs ${CONTAINER_ID}
-                                docker stop ${CONTAINER_ID}
-                                docker rm ${CONTAINER_ID}
-                                exit 1
-                            fi
-                            
-                            # Test metrics endpoint
-                            if curl -f http://localhost:${TEST_PORT}/metrics; then
-                                echo "✅ Metrics endpoint test passed"
-                            else
-                                echo "⚠️ Metrics endpoint test failed (non-critical)"
-                            fi
-                            
-                            # Cleanup
-                            docker stop ${CONTAINER_ID}
-                            docker rm ${CONTAINER_ID}
-                            
-                            echo "✅ API tests completed successfully"
-                        '''
+                                
+                                echo "✅ API tests completed successfully"
+                            '''
+                        }
                     }
                 }
-            }
+            }    
         }
         
         // Stage 4: Docker Image Building
