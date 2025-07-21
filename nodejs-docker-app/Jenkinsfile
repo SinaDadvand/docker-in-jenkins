@@ -249,6 +249,12 @@ pipeline {
                         dir('nodejs-docker-app') { 
                             sh '''
                                 echo "🧪 Running unit tests..."
+                                echo "Checking for package-lock.json..."
+                                if [ ! -f "package-lock.json" ]; then
+                                    echo "Generating package-lock.json..."
+                                    npm install --package-lock-only
+                                fi
+                                
                                 echo "Installing test dependencies..."
                                 npm ci
                                 
@@ -284,20 +290,22 @@ pipeline {
                 // Integration tests in Docker
                 stage('Integration Tests') {
                     steps {
-                        echo "🔗 Running integration tests in Docker..."
-                        sh '''
-                            echo "Building test image..."
-                            docker build -f docker/Dockerfile.test -t ${IMAGE_NAME}:test .
-                            
-                            echo "Running integration tests in container..."
-                            docker run --rm \
-                                --name ${TEST_CONTAINER_NAME}-integration \
-                                -e NODE_ENV=test \
-                                -e CI=true \
-                                ${IMAGE_NAME}:test
-                            
-                            echo "✅ Integration tests completed"
-                        '''
+                        dir('nodejs-docker-app') { 
+                            echo "🔗 Running integration tests in Docker..."
+                            sh '''
+                                echo "Building test image..."
+                                docker build -f docker/Dockerfile.test -t ${IMAGE_NAME}:test .
+                                
+                                echo "Running integration tests in container..."
+                                docker run --rm \
+                                    --name ${TEST_CONTAINER_NAME}-integration \
+                                    -e NODE_ENV=test \
+                                    -e CI=true \
+                                    ${IMAGE_NAME}:test
+                                
+                                echo "✅ Integration tests completed"
+                            '''
+                        }
                     }
                 }
                 
