@@ -242,8 +242,8 @@ pipeline {
             when {
                 expression { !params.SKIP_TESTS }
             }
-            dir('nodejs-docker-app') {    
-                parallel {
+            parallel {
+                dir('nodejs-docker-app') { 
                     // Unit tests
                     stage('Unit Tests') {
                         steps {
@@ -357,7 +357,6 @@ pipeline {
                                 echo "✅ API tests completed successfully"
                             '''
                         }
-                    }
                 }
             }    
         }
