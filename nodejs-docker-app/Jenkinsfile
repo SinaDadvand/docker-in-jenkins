@@ -260,8 +260,14 @@ pipeline {
                                 echo "Installing test dependencies..."
                                 npm ci
                                 
-                                echo "Running unit test suite..."
-                                npm test -- --coverage --watchAll=false --testResultsProcessor=jest-junit
+                                # Run tests with appropriate flags for CI
+                                npm test -- \
+                                    --coverage \
+                                    --watchAll=false \
+                                    --testResultsProcessor=jest-junit \
+                                    --forceExit \
+                                    --maxWorkers=2 \
+                                    --detectOpenHandles
                                 
                                 echo "✅ Unit tests completed"
                             '''
