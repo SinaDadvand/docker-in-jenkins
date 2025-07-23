@@ -376,7 +376,7 @@ pipeline {
                             '''
                         }
                     }
-            }    
+            }   } 
         }
         
         // Stage 4: Docker Image Building
