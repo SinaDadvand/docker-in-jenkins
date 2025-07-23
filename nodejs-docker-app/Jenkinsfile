@@ -320,59 +320,60 @@ pipeline {
                 // API tests
                 stage('API Tests') {
                     steps {
-                        echo "🌐 Running API tests..."
-                        sh '''
-                            echo "Starting application for API testing..."
-                            
-                            # Build and start application container
-                            docker build -t ${IMAGE_NAME}:api-test .
-                            CONTAINER_ID=$(docker run -d -p ${TEST_PORT}:3000 \
-                                --name ${TEST_CONTAINER_NAME}-api \
-                                -e NODE_ENV=test \
-                                ${IMAGE_NAME}:api-test)
-                            
-                            # Wait for application to start
-                            echo "Waiting for application to start..."
-                            sleep 10
-                            
-                            # Run API tests
-                            echo "Testing API endpoints..."
-                            
-                            # Test health endpoint
-                            if curl -f http://localhost:${TEST_PORT}/health; then
-                                echo "✅ Health endpoint test passed"
-                            else
-                                echo "❌ Health endpoint test failed"
-                                docker logs ${CONTAINER_ID}
+                        dir('nodejs-docker-app') {
+                            echo "🌐 Running API tests..."
+                            sh '''
+                                echo "Starting application for API testing..."
+                                
+                                # Build and start application container
+                                docker build -t ${IMAGE_NAME}:api-test .
+                                CONTAINER_ID=$(docker run -d -p ${TEST_PORT}:3000 \
+                                    --name ${TEST_CONTAINER_NAME}-api \
+                                    -e NODE_ENV=test \
+                                    ${IMAGE_NAME}:api-test)
+                                
+                                # Wait for application to start
+                                echo "Waiting for application to start..."
+                                sleep 10
+                                
+                                # Run API tests
+                                echo "Testing API endpoints..."
+                                
+                                # Test health endpoint
+                                if curl -f http://localhost:${TEST_PORT}/health; then
+                                    echo "✅ Health endpoint test passed"
+                                else
+                                    echo "❌ Health endpoint test failed"
+                                    docker logs ${CONTAINER_ID}
+                                    docker stop ${CONTAINER_ID}
+                                    docker rm ${CONTAINER_ID}
+                                    exit 1
+                                fi
+                                
+                                # Test main endpoint
+                                if curl -f http://localhost:${TEST_PORT}/; then
+                                    echo "✅ Main endpoint test passed"
+                                else
+                                    echo "❌ Main endpoint test failed"
+                                    docker logs ${CONTAINER_ID}
+                                    docker stop ${CONTAINER_ID}
+                                    docker rm ${CONTAINER_ID}
+                                    exit 1
+                                fi
+                                
+                                # Test metrics endpoint
+                                if curl -f http://localhost:${TEST_PORT}/metrics; then
+                                    echo "✅ Metrics endpoint test passed"
+                                else
+                                    echo "⚠️ Metrics endpoint test failed (non-critical)"
+                                fi
+                                
+                                # Cleanup
                                 docker stop ${CONTAINER_ID}
                                 docker rm ${CONTAINER_ID}
-                                exit 1
-                            fi
-                            
-                            # Test main endpoint
-                            if curl -f http://localhost:${TEST_PORT}/; then
-                                echo "✅ Main endpoint test passed"
-                            else
-                                echo "❌ Main endpoint test failed"
-                                docker logs ${CONTAINER_ID}
-                                docker stop ${CONTAINER_ID}
-                                docker rm ${CONTAINER_ID}
-                                exit 1
-                            fi
-                            
-                            # Test metrics endpoint
-                            if curl -f http://localhost:${TEST_PORT}/metrics; then
-                                echo "✅ Metrics endpoint test passed"
-                            else
-                                echo "⚠️ Metrics endpoint test failed (non-critical)"
-                            fi
-                            
-                            # Cleanup
-                            docker stop ${CONTAINER_ID}
-                            docker rm ${CONTAINER_ID}
-                            
-                            echo "✅ API tests completed successfully"
-                        '''
+                                
+                                echo "✅ API tests completed successfully"
+                            '''
                         }
                     }
             }    
